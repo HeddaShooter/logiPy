@@ -216,26 +216,52 @@ LOGI_DEVICETYPE_ALL             = LOGI_DEVICETYPE_MONOCHROME | LOGI_DEVICETYPE_R
 #
 _LOGI_SHARED_SDK_LED            = ctypes.c_int(1)
 
-class SDKNotFoundException:
+class SDKNotFoundException(Exception):
     pass
 
-def load_dll(path_dll = None):
-    if not path_dll:
-        bitness = 'x86' if platform.architecture()[0] == '32bit' else 'x64'
-        subpath_dll = r'/Logitech Gaming Software/SDK/LED/{}/LogitechLed.dll'.format(bitness)
-        try:
-            subpath_lgs = os.environ['ProgramW6432']
-        except KeyError:
-            subpath_lgs = os.environ['ProgramFiles']
-        path_dll = subpath_lgs + subpath_dll
-    if os.path.exists(path_dll):
-        return ctypes.cdll.LoadLibrary(path_dll)
+def load_dll(path_dll=None):
+    # Use provided path if valid
+    if path_dll and os.path.exists(path_dll):
+        dll = ctypes.WinDLL(path_dll)
+        print("Loaded Logitech LED DLL:", path_dll)
     else:
-        raise SDKNotFoundException('The SDK DLL was not found.')
+        # Is 64bit or 32bit?
+        arch = platform.architecture()[0]  # 64bit or 32bit
+        dll_name = "sdk_legacy_led_x64.dll" if arch == "64bit" else "sdk_legacy_led_x86.dll"
 
+        # Check usual LGHUB folders
+        possible_roots = [
+            os.environ.get("ProgramFiles"),       # 64-bit
+            os.environ.get("ProgramFiles(x86)"),  # 32-bit
+        ]
+
+        dll = None
+        for root in filter(None, possible_roots):
+            path = os.path.join(root, "LGHUB", "sdks", dll_name)
+            if os.path.exists(path):
+                dll = ctypes.WinDLL(path)
+                print("Loaded Logitech LED DLL:", path)
+                break
+
+        if dll is None:
+            raise SDKNotFoundException(
+                f"Logitech LED SDK DLL not found for architecture {arch}."
+            )
+
+    # Define function signatures
+    dll.LogiLedInit.restype = ctypes.c_bool
+    dll.LogiLedShutdown.restype = ctypes.c_bool
+    dll.LogiLedSetLighting.restype = ctypes.c_bool
+    dll.LogiLedSetTargetDevice.restype = ctypes.c_bool
+
+    return dll
+
+# Load DLL safely (always define led_dll)
+led_dll = None
 try:
     led_dll = load_dll()
-except SDKNotFoundException as exception_sdk:
+except Exception as e:
+    print("Logitech LED SDK load failed:", e)
     led_dll = None
 
 
